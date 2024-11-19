@@ -113,10 +113,7 @@ float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gra
 //#define OUTPUT_READABLE_WORLDACCEL
 
 
-// ================================================================
-// ===               INTERRUPT DETECTION ROUTINE                ===
-// ================================================================
-
+// set interrupt for MPU6050
 volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
 void dmpDataReady() {
     mpuInterrupt = true;
@@ -150,26 +147,32 @@ void setup() {
   scaleL.begin(LEFT_LOADCELL_DOUT_PIN, LEFT_LOADCELL_SCK_PIN);
   LoadCellCalibrateSensors();
  
+  // Start I2C interface 
   Wire.begin(I2C_SDA, I2C_SCL);
   Wire.setClock(400000); // 400kHz I2C clock.
 
   // Baro initialization 
+  Serial.println("Initializing BMP180 Barometer");
   baro.begin(0);
   baro.measurement(3); // 0 - грязные данные 1-2-3 повышение качества данных
 
   // initializing IMU GY-87
   Serial.println("Initializing I2C devices...");
   // initialize QMC5883L compas device
+  Serial.println("Initializing QMC5883L Compass");
   compass.init();
-    compass.setCalibrationOffsets(50.00, 1423.00, -265.00); // заменить на механизм автоматической калибровки
-    compass.setCalibrationScales(0.87, 1.06, 1.11); // заменить на механизм автоматической калибровки
+  Serial.println("Setting OffSets for Compass");
+  compass.setCalibrationOffsets(50.00, 1423.00, -265.00); // заменить на механизм автоматической калибровки
+  compass.setCalibrationScales(0.87, 1.06, 1.11); // заменить на механизм автоматической калибровки
 
   // initialize MPU6050 AccelGyro device
+  Serial.println("Initializing MPU6050 Accelerometer ang Giroscope");
   accelgyro.initialize();
   pinMode(INTERRUPT_PIN, INPUT);
   accelgyro.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
   accelgyro.setFullScaleGyroRange(MPU6050_GYRO_FS_2000);      
   
+  Serial.println("Setting OffSets for Accel and Gyro");
   devStatus = accelgyro.dmpInitialize();   
     accelgyro.setXAccelOffset(-1003);
     accelgyro.setYAccelOffset(-465);
@@ -180,6 +183,7 @@ void setup() {
   
   if (devStatus == 0) {
     // Calibration Time: generate offsets and calibrate our MPU6050
+    Serial.println("Calibrating Accel and Gyro");
     accelgyro.CalibrateAccel(6);
     accelgyro.CalibrateGyro(6);
     accelgyro.PrintActiveOffsets();
@@ -209,8 +213,9 @@ void setup() {
       Serial.print(devStatus);
       Serial.println(F(")"));
   }
+ Serial.println(accelgyro.testConnection() ? "MPU6050 connection successful" : "MPU6050 connection failed");
 
-// это какой-то странный код для того чтобы было видно QMC5883L
+// это какой-то странный код для того чтобы было видно QMC5883L вместе с MPU6050
   //Bypass Mode
   Wire.beginTransmission(0x68);
   Wire.write(0x37);
@@ -228,16 +233,15 @@ void setup() {
   Wire.write(0x00);
   Wire.endTransmission();  
 */
-  Serial.println("Testing device connections...");
-  Serial.println(accelgyro.testConnection() ? "MPU6050 connection successful" : "MPU6050 connection failed");
-
+  
 // Madgwick initialization
+Serial.println("Initializing Madgwick Quadrobion");
   filter.begin(25);
 
 
 // BLE Server initialization
+  Serial.println("Creating BLE Server and Characteristic");
   BLEDevice::init("SmartVeslo");
-
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
   pService = pServer->createService(SERVICE_UUID);
@@ -263,6 +267,7 @@ void setup() {
   );
   forceR->setValue("0");
   */
+  Serial.println("Starting BLE Server");
   pService->start();
 
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
@@ -430,9 +435,9 @@ void loop() {
     Serial.print(ntemp);
     
     Serial.print(" | mag"); 
-    Serial.print(" X: "); Serial.print(nmx);
-    Serial.print(" Y: "); Serial.print(nmy);
-	  Serial.print(" Z: ");	Serial.print(nmz);
+    Serial.print(nmx); Serial.print(" ");
+    Serial.print(nmy); Serial.print(" ");
+	  Serial.print(nmz); Serial.print(" ");
 	  Serial.print(" Azimuth: ");	Serial.print(azimuth);
 	  Serial.print(" Bearing: ");	Serial.print(bearing);
     Serial.print(" Direction: "); Serial.print(myArray[0]); Serial.print(myArray[1]); Serial.print(myArray[2]);
@@ -456,10 +461,11 @@ void loop() {
     int16_t gx, gy, gz;
     int mx, my, mz;
     int azimuth;
+    float roll, pitch, heading;
   } imuDataStruct;
 
   // Заполнение структуры данными
-  imuDataStruct = {LoadCell_L, LoadCell_R, ax, ay, az, gx, gy, gz, mx, my, mz, azimuth};
+  imuDataStruct = {LoadCell_L, LoadCell_R, ax, ay, az, gx, gy, gz, mx, my, mz, azimuth, roll, pitch, heading;};
 
   // Отправка данных IMU через BLE
   // push IMU data to BLE Client
