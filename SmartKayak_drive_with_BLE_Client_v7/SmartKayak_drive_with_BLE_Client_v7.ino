@@ -3,7 +3,7 @@ this part od code is main Kayak driver
 and BLE client for padel tenzosensors
 This project is designed and definet by Alexander Bogachenko baga@mail.ru 
 */ 
-//#define PRINT_IMU_TO_CONSOLE // uncoment if you want to see padel data in serial
+//#define PRINT_IMU_TO_CONSOLE // uncoment if you want to see IMU data in serial
 
 // Define pins
 #define BUTTON_PIN    18 // ESP32 pin GPIO18, which connected to power mode changing button
