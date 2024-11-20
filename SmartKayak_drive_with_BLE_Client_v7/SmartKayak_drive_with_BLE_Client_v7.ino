@@ -592,6 +592,7 @@ void loop() {
 
   if (!isConnected&&!doConnect) {
     if ((currentMillis - lastConnectionAttempt >= CONNECTION_ATTEMPT_INTERVAL) || doScan) {
+      doScan=false; 
       lastConnectionAttempt = currentMillis;
       Serial.println("Searching for a paddle...");
       BLEDevice::getScan()->start(1, scanCompletedCallback);
