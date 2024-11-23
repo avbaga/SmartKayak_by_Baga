@@ -18,15 +18,15 @@ This project is designed and definet by Alexander Bogachenko baga@mail.ru
 #define PWM1_Ch    0
 #define PWM1_Res   8
 #define PWM1_Freq  1000
-#define PWM1_HIGH  3.0 
-#define PWM1_MED   2.0
-#define PWM1_LOW   1.0
-
-// define initial power state, mode and force threshold
-const int FORCE_THRESHOLD = 20; // минимальный уровень чувствительности тензодатчиков
-const int MAX_FORCE = 100; // максимальное усилие на весле
-int PWM1_DutyCycle = 0;
-int Padel_mode = 3; // Starting from LOW mode
+#define PWM1_HIGH  3.0 // мультипликатор усилия для режима HIGH
+#define PWM1_MED   2.0 // мультипликатор усилия для режима MED
+#define PWM1_LOW   1.0 // мультипликатор усилия для режима LOW
+const int FORCE_THRESHOLD = 20; // нижний порогчувствительности тензодатчиков в граммах
+const int MAX_FORCE = 5000; // максимальное возможное усилие на весле в граммах
+int PWM1_DutyCycle = 0; // стартовая загрузка ШИМ управления мотором
+int Padel_mode = 3; // Начальный режим работы LOW
+long lastMotorDriveTime = 0;
+long MotorDriveDelay = 500;  // интервал управления мотором в мс
 
 //-----------------------------------------------------------
 //IMU configuration
@@ -38,8 +38,8 @@ int Padel_mode = 3; // Starting from LOW mode
 
 long lastImuCheckTime = 0;
 long ImuCheckDelay = 200; // Интервал чтения локального IMU
-#define PRINT_IMU_TO_CONSOLE // uncoment if you want to see IMU data in serial
-
+#define PRINT_IMU_TO_CONSOLE // uncoment if you want to see Kayak IMU data in serial
+#define PRINT_PADEL_TO_CONSOLE // uncoment if you want to see Padel IMU data in serial
 
 // Barometer configuration
 #include <iarduino_Pressure_BMP.h> 
@@ -91,7 +91,7 @@ float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gra
 // not compensated for orientation, so +X is always +X according to the
 // sensor, just without the effects of gravity. If you want acceleration
 // compensated for orientation, us OUTPUT_READABLE_WORLDACCEL instead.
-#define OUTPUT_READABLE_REALACCEL
+// #define OUTPUT_READABLE_REALACCEL
 
 // uncomment "OUTPUT_READABLE_WORLDACCEL" if you want to see acceleration
 // components with gravity removed and adjusted for the world frame of
@@ -167,18 +167,22 @@ static void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic,
   if (sIMU_UUID == sBLERemoteCharacteristic) {
   //  if (length == sizeof(IMUData)) {
       memcpy(&imuDataStruct, pData, sizeof(IMUData));
-      Serial.println("Получены данные с Весла:");
       iForceL = imuDataStruct.LoadCell_L;
       iForceR = imuDataStruct.LoadCell_R;
-      Serial.print("LoadCell_L: "); Serial.print(imuDataStruct.LoadCell_L);
-      Serial.print("LoadCell_R: "); Serial.print(imuDataStruct.LoadCell_R);
-      Serial.print("ax: "); Serial.print(imuDataStruct.ax);
-      Serial.print(", ay: "); Serial.print(imuDataStruct.ay);
-      Serial.print(", az: "); Serial.println(imuDataStruct.az);
-      Serial.print(", gx: "); Serial.println(imuDataStruct.gx);
-      Serial.print(", gy: "); Serial.println(imuDataStruct.gy);
-      Serial.print(", gz: "); Serial.println(imuDataStruct.gz);
-      // Добавьте вывод остальных данных по желанию
+      #ifdef PRINT_PADEL_TO_CONSOLE
+        Serial.print("Padel: "); 
+        Serial.print("\t| LoadCell_L: "); Serial.print(imuDataStruct.LoadCell_L);
+        Serial.print("\t| LoadCell_R: "); Serial.print(imuDataStruct.LoadCell_R);
+        Serial.print("\t| ax: "); Serial.print(imuDataStruct.ax);
+        Serial.print("\t ay: "); Serial.print(imuDataStruct.ay);
+        Serial.print("\t az: "); Serial.print(imuDataStruct.az);
+        Serial.print("\t gx: "); Serial.print(imuDataStruct.gx);
+        Serial.print("\t gy: "); Serial.print(imuDataStruct.gy);
+        Serial.print("\t gz: "); Serial.print(imuDataStruct.gz);
+        Serial.println(); 
+        // Добавьте вывод остальных данных по желанию
+      #endif
+     
     //}
   }
 /*
@@ -373,6 +377,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks
 // button handling
 volatile bool buttonPressed = false;
 
+// функция управления режимом работы т.е. мультипликатором через кнопку
 void handleButtonPress() {
   // static unsigned long lastDebounceTime = 0;
   // unsigned long debounceDelay = 50; // Задержка для устранения дребезга контактов
@@ -383,21 +388,21 @@ void handleButtonPress() {
         digitalWrite(LOW_LED_PIN, HIGH);
         digitalWrite(MED_LED_PIN, LOW);
         digitalWrite(HIGH_LED_PIN, LOW);
-        Serial.println("Переключение режима весла на LOW");
+        Serial.println("Переключение режима на LOW");
         break;
       case 2:
         Padel_mode = 1; // Установить режим POWER
         digitalWrite(LOW_LED_PIN, LOW);
         digitalWrite(MED_LED_PIN, LOW);
         digitalWrite(HIGH_LED_PIN, HIGH);
-        Serial.println("Переключение режима весла на HIGH");
+        Serial.println("Переключение режима на HIGH");
         break;
       case 3:
         Padel_mode = 2; // Установить режим MEDIUM
         digitalWrite(LOW_LED_PIN, LOW);
         digitalWrite(MED_LED_PIN, HIGH);
         digitalWrite(HIGH_LED_PIN, LOW);
-        Serial.println("Переключение режима весла на MEDIUM");
+        Serial.println("Переключение режима на MEDIUM");
         break;
     }
   //  lastDebounceTime = millis();
@@ -418,7 +423,7 @@ void dmpDataReady() {
 }
 //------------------------------------------------------
 
-// Обновленная функция управления мотором
+// Функция управления мотором
 void driveMotor(int32_t iForceR, int32_t iForceL) {
   int32_t absForceR = abs(iForceR);
   int32_t absForceL = abs(iForceL);
@@ -441,12 +446,12 @@ void driveMotor(int32_t iForceR, int32_t iForceL) {
     digitalWrite(REVERSE_PIN, !isReverse);
     ledcWrite(PWM1_Ch, PWM1_DutyCycle);
     
-    Serial.print("Full Force: ");
+    Serial.print("\t| Full Force: ");
     Serial.print(iForceFull);
-    Serial.print("\t | adjusted to ");
+    Serial.print("\t| adjusted to ");
     Serial.print(isReverse ? "- " : "+ ");
     Serial.print(PWM1_DutyCycle);
-    Serial.print("\t | With multiplier: ");
+    Serial.print("\t| With multiplier: ");
     Serial.println(modeMultiplier);
   } else {
     digitalWrite(REVERSE_PIN, HIGH);
@@ -528,7 +533,7 @@ void setup() {
     Serial.println(F("Enabling DMP..."));
     accelgyro.setDMPEnabled(true);
 
-    // enable Arduino interrupt detection
+    // enable interrupt detection
     Serial.print(F("Enabling interrupt detection (Arduino external interrupt "));
     Serial.print(digitalPinToInterrupt(INTERRUPT_PIN));
     Serial.println(F(")..."));
@@ -589,11 +594,12 @@ void loop() {
       doScan=false;
       Serial.println("Searching for a paddle...");
       BLEDevice::getScan()->start(1, scanCompletedCallback);
-      driveMotor(0, 0); // не ктурим мотор
+      // Serial.print("Stop the motor"); driveMotor(0, 0); // не ктурим мотор
     }
   }
   if (doConnect)
   {
+    Serial.print("Stop the motor! "); driveMotor(0, 0); // не ктурим мотор если весло потерялось
     if (connectToServer())
     {
       Serial.println("We are now connected to the BLE Server.");
@@ -610,7 +616,6 @@ void loop() {
         myDevice = nullptr;
       }
       doScan = true;
-      driveMotor(0, 0); // не ктурим мотор
     }
   }
 
@@ -620,14 +625,16 @@ void loop() {
       kayak_imu(); // вычитываем данные с локального IMU
       lastImuCheckTime = millis();
     }
-    driveMotor(iForceR, iForceL); // ктурим мотор
-  };  
-  
+    if ((millis() - lastMotorDriveTime) > MotorDriveDelay) {
+      Serial.print("Drive the motor: "); 
+      driveMotor(iForceR, iForceL); // ктурим мотор
+      lastMotorDriveTime = millis();
+    }    
+  }  
+
   if (buttonPressed) {
     handleButtonPress();
   }
-
-  delay(100);
 }
 
 
@@ -655,18 +662,18 @@ void kayak_imu() {
   if (!dmpReady) return;
     // read a packet from FIFO
     if (accelgyro.dmpGetCurrentFIFOPacket(fifoBuffer)) { // Get the Latest packet 
+      #ifdef PRINT_IMU_TO_CONSOLE
+          Serial.print("Kayak: ");
+      #endif
       #ifdef OUTPUT_READABLE_QUATERNION
         // display quaternion values in easy matrix form: w x y z
         accelgyro.dmpGetQuaternion(&q, fifoBuffer);
         #ifdef PRINT_IMU_TO_CONSOLE
-          Serial.print("quat\t");
-          Serial.print(q.w);
-          Serial.print("\t");
-          Serial.print(q.x);
-          Serial.print("\t");
-          Serial.print(q.y);
-          Serial.print("\t");
-          Serial.println(q.z);
+          Serial.print("\t quat: ");
+          Serial.print("\t"); Serial.print(q.w);
+          Serial.print("\t"); Serial.print(q.x); 
+          Serial.print("\t"); Serial.print(q.y); 
+          Serial.print("\t"); Serial.print(q.z); 
          #endif 
       #endif
 
@@ -675,12 +682,10 @@ void kayak_imu() {
         accelgyro.dmpGetQuaternion(&q, fifoBuffer);
         accelgyro.dmpGetEuler(euler, &q);
         #ifdef PRINT_IMU_TO_CONSOLE
-          Serial.print("euler\t");
-          Serial.print(euler[0] * 180/M_PI);
-          Serial.print("\t");
-          Serial.print(euler[1] * 180/M_PI);
-          Serial.print("\t");
-          Serial.println(euler[2] * 180/M_PI);
+          Serial.print("\t| euler:");
+          Serial.print("\t"); Serial.print(euler[0] * 180/M_PI);
+          Serial.print("\t"); Serial.print(euler[1] * 180/M_PI);
+          Serial.print("\t"); Serial.print(euler[2] * 180/M_PI);
         #endif
       #endif
 
@@ -690,12 +695,10 @@ void kayak_imu() {
         accelgyro.dmpGetGravity(&gravity, &q);
         accelgyro.dmpGetYawPitchRoll(ypr, &q, &gravity);
         #ifdef PRINT_IMU_TO_CONSOLE
-          Serial.print("ypr\t");
-          Serial.print(ypr[0] * 180/M_PI);
-          Serial.print("\t");
-          Serial.print(ypr[1] * 180/M_PI);
-          Serial.print("\t");
-          Serial.println(ypr[2] * 180/M_PI);
+          Serial.print("\t| ypr: ");
+          Serial.print("\t"); Serial.print(ypr[0] * 180/M_PI); 
+          Serial.print("\t"); Serial.print(ypr[1] * 180/M_PI); 
+          Serial.print("\t"); Serial.print(ypr[2] * 180/M_PI);
         #endif
       #endif
 
@@ -706,12 +709,10 @@ void kayak_imu() {
         accelgyro.dmpGetGravity(&gravity, &q);
         accelgyro.dmpGetLinearAccel(&aaReal, &aa, &gravity);
         #ifdef PRINT_IMU_TO_CONSOLE
-          Serial.print("areal\t");
-          Serial.print(aaReal.x);
-          Serial.print("\t");
-          Serial.print(aaReal.y);
-          Serial.print("\t");
-          Serial.println(aaReal.z);
+          Serial.print("\t| areal: ");
+          Serial.print("\t"); Serial.print(aaReal.x); 
+          Serial.print("\t"); Serial.print(aaReal.y); 
+          Serial.print("\t"); Serial.print(aaReal.z); 
         #endif
       #endif
 
@@ -724,12 +725,10 @@ void kayak_imu() {
         accelgyro.dmpGetLinearAccel(&aaReal, &aa, &gravity);
         accelgyro.dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
         #ifdef PRINT_IMU_TO_CONSOLE
-          Serial.print("aworld\t");
-          Serial.print(aaWorld.x);
-          Serial.print("\t");
-          Serial.print(aaWorld.y);
-          Serial.print("\t");
-          Serial.println(aaWorld.z);
+          Serial.print("\t| aworld: ");
+          Serial.print("\t"); Serial.print(aaWorld.x);
+          Serial.print("\t"); Serial.print(aaWorld.y); 
+          Serial.print("\t"); Serial.print(aaWorld.z); 
         #endif
       #endif    
     }  
@@ -750,12 +749,12 @@ void kayak_imu() {
     //barometer read - не знаю зачем он нам но раз есть я его подключил
     #ifdef PRINT_IMU_TO_CONSOLE
       if( baro.read(2) ){ // Функция read(2) читает давление в Па, температуру в °С и высоту в м.
-          Serial.print((String) "Датчик BMP"+ baro.type        + ": ");
-          Serial.print((String) "P = "      + baro.pressure    + " Pa, \t");
-          Serial.print((String) "T = "      + baro.temperature + " *C, \t\t");
-          Serial.print((String) "B = "      + baro.altitude    + " м.\r\n");
+          Serial.print((String) "\t| BMP" + baro.type        + ": ");
+          Serial.print((String) "\t P = " + baro.pressure    + " Pa."); 
+          Serial.print((String) "\t T = " + baro.temperature + " *C"); 
+          Serial.print((String) "\t B = " + baro.altitude    + " м."); 
       }else{
-          Serial.println("Нет ответа от датчика.");   
+          Serial.println("Нет ответа от BPM датчика.");   
       }
     #endif
     // convert from raw data to gravity and degrees/second units
@@ -776,37 +775,36 @@ void kayak_imu() {
     // выводим показатели в серийный порт
     #ifdef PRINT_IMU_TO_CONSOLE
       // print IMU values
-      Serial.print("\t| acc ");
-      Serial.print(kayak_nax); Serial.print(" ");
-      Serial.print(kayak_nay); Serial.print(" ");
-      Serial.print(kayak_naz);
+      Serial.print("\t| Accel: ");
+      Serial.print("\t"); Serial.print(kayak_nax);
+      Serial.print("\t"); Serial.print(kayak_nay);
+      Serial.print("\t"); Serial.print(kayak_naz);
       
-      Serial.print("\t| gyr ");
-      Serial.print(kayak_ngx); Serial.print(" ");
-      Serial.print(kayak_ngy); Serial.print(" ");
-      Serial.print(kayak_ngz);
+      Serial.print("\t| Gyro: ");
+      Serial.print("\t"); Serial.print(kayak_ngx); 
+      Serial.print("\t"); Serial.print(kayak_ngy); 
+      Serial.print("\t"); Serial.print(kayak_ngz);
       
-      Serial.print("| t* ");
+      Serial.print("\t| t*: ");
       Serial.print(kayak_ntemp);
       
-      Serial.print(" | mag"); 
-      Serial.print(kayak_nmx); Serial.print(" ");
-      Serial.print(kayak_nmy); Serial.print(" ");
-      Serial.print(kayak_nmz); Serial.print(" ");
-      Serial.print(" Azimuth: ");	Serial.print(kayak_azimuth);
-      Serial.print(" Bearing: ");	Serial.print(kayak_bearing);
-      Serial.print(" Direction: "); Serial.print(myArray[0]); Serial.print(myArray[1]); Serial.print(myArray[2]);
-      Serial.println();
+      Serial.print("\t| Compass: "); 
+      Serial.print("\t"); Serial.print(kayak_nmx); 
+      Serial.print("\t"); Serial.print(kayak_nmy);
+      Serial.print("\t"); Serial.print(kayak_nmz);
+      Serial.print("\t Azimuth: "); Serial.print(kayak_azimuth);
+      Serial.print("\t Bearing: "); Serial.print(kayak_bearing);
+      Serial.print("\t Direction: "); Serial.print(myArray[0]); Serial.print(myArray[1]); Serial.print(myArray[2]);
+     // Serial.println();
 
       // print the quadrobion heading, pitch and roll
       kayak_roll = filter.getRoll();
       kayak_pitch = filter.getPitch();
       kayak_heading = filter.getYaw();
-      Serial.print("Madgwick Q*: "); 
-      Serial.print(kayak_heading);
-      Serial.print(" ");
-      Serial.print(kayak_pitch);
-      Serial.print(" ");
-      Serial.println(kayak_roll);
+      Serial.print("\t| Madgwick: "); 
+      Serial.print("\t y:"); Serial.print(kayak_heading);
+      Serial.print("\t p:"); Serial.print(kayak_pitch);
+      Serial.print("\t r:"); Serial.print(kayak_roll);
+      Serial.println();
     #endif  
 }
