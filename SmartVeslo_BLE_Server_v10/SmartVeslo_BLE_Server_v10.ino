@@ -1,6 +1,8 @@
 // Smart Veslo by Baga
 //Padel with two tenzosensors and BLE Server
 
+// power control pin power is on during HIGH
+#define POWER_PIN 1 // power is ON during HIGH
 // ESP32C3v2 Supermini RGB onboard LED
 #define RGB_BRIGHTNESS 64 // Change white brightness (max 255)
 #define RGB_BUILTIN 8 // PIN for RGB onboard LED
@@ -138,6 +140,8 @@ float roll, pitch, heading;
 
 
 void setup() {
+  pinMode(POWER_PIN, OUTPUT);
+  digitalWrite(POWER_PIN, HIGH);
   Serial.begin(115200);
   Serial.println("Smart Padel by Baga");
 
@@ -281,6 +285,7 @@ Serial.println("Initializing Madgwick Quadrobion");
   }
  
 void loop() {
+   digitalWrite(POWER_PIN, HIGH); // почему-то в setup оказалось не достаточно
    if (!deviceConnected && oldDeviceConnected) {
     delay(500); // delay for BLE stack
     pServer->startAdvertising(); // restart advertising
@@ -465,7 +470,7 @@ void loop() {
   } imuDataStruct;
 
   // Заполнение структуры данными
-  imuDataStruct = {LoadCell_L, LoadCell_R, ax, ay, az, gx, gy, gz, mx, my, mz, azimuth, roll, pitch, heading;};
+  imuDataStruct = {LoadCell_L, LoadCell_R, ax, ay, az, gx, gy, gz, mx, my, mz, azimuth, roll, pitch, heading};
 
   // Отправка данных IMU через BLE
   // push IMU data to BLE Client
