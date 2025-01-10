@@ -299,8 +299,8 @@ void loop() {
   
   if (deviceConnected) {
     // HX711 tenzosensors reading
-    int32_t LoadCell_R = (int32_t)scaleR.get_units(1);
-    int32_t LoadCell_L = (int32_t)scaleL.get_units(1);
+    int32_t LoadCell_R = (int32_t)scaleR.get_units(1)*-1;
+    int32_t LoadCell_L = (int32_t)scaleL.get_units(1)*-1;
     scaleR.power_down();			        // put the ADC in sleep mode
     scaleL.power_down();			        // put the ADC in sleep mode
     if (LoadCell_R == INT32_MAX || LoadCell_L == INT32_MAX) {
